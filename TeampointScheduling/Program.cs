@@ -635,51 +635,15 @@ namespace TeampointScheduling
                 for (int i = 0; i < staffset.Count(); i++)
                 {
 
-
-                    //create an 3D array to store overlap windows
-                    int[,,] overlap = new int[capable_[i].Count(), winNum, 2]; // [job, overlap start, overlap end]
-
-                    for (int j = 0; j < capable_[i].Count(); j++)
-                    {
-                        int idx = Array.IndexOf(staffset[i].work_dates, horizon[d]);
-                        for (int k = 0; k < capable_[i][j].win_str.Length; k++)  //capable[staff][possible duty]  
-                        {
-                            int staffstart = staffset[i].work_str[idx];
-                            int staffend = staffset[i].work_end[idx];
-                            int jobstart = capable_[i][j].win_str[k];
-                            int jobend = capable_[i][j].win_end[k];
-
-                            //Count the staff and job windows overlap  
-                            int overlap_lw = Math.Max(staffstart, jobstart);
-                            int overlap_up = Math.Min(staffend, jobend);
-
-                            if (overlap_up - overlap_lw > 0) //that there is overlap 
-                            {
-                                overlap[j, k, 0] = overlap_lw;
-                                overlap[j, k, 1] = overlap_up;
-                            }
-
-
-
-
-
-
-
-                        }
-                    }
-
-
-
                     //================== Initial Assignment =============================================
                     
-                    //find the staff work strat and end on a specific date
+                    //find the staff work start and end on a specific date
                     //index == -1 when the system can't find index of date
                     int index = Array.IndexOf(staffset[i].work_dates, horizon[d]);
                     //Console.WriteLine("index={0}\n", index);
                     //Console.WriteLine("staff {0} \n", staffset[i].personID);
 
-                    //Case 1: staff doesn't work this date, then assign dayoff
-                    if (index < 0) 
+                    if (index < 0)
                     {
                         initial[i].Add(new assign
                         {
@@ -689,43 +653,257 @@ namespace TeampointScheduling
                             job_end = 0,
                             totalwork = 0,
                         });
+                        Console.WriteLine("\nstaff {0} doesn't work on the date", staffset[i].personID);
                     }
-                    //Case 2: staff works on this date, randomly assign a job from possible job list
                     else 
                     {
-                        if (capable_[i].Count() > 0) //staff has possible work 
+                        if (capable_[i].Count() == 0)
+                            Console.WriteLine("\nstaff {0} works, but has no capable job on the date", staffset[i].personID);
+
+                        else if(capable_[i].Count() > 0)
                         {
-                            // random generate the job index                                      
-                            Random rand = new Random(); //random object
-                            int rnd = rand.Next(capable_[i].Count());
+                            int temp = 0;
+                            while (capable_[i].Count() > 0)
+                            {
+                            //Part1: Update available Windows  ======================================
+                                int staff_str;
+                                int staff_end;
 
-                            //two cases compare the start time of staffwork or possible job, and add with different job start
-                            int startcheck = capable_[i][rnd].win_str[0] - staffset[i].work_str[index];
+                                available_wins[i].Clear();
+
+                                //Can't find date in staffset workdate, index == -1
+                                if (index < 0)
+                                {
+                                    available_wins[i].Add(new available
+                                    {
+                                        str = 0,
+                                        end = 0,
+                                        duration = 0,
+                                    });
+                                    //Console.WriteLine("\nstaff {0} doesn't work on the date", staffset[i].personID);
+
+                                }
+
+                                //staff work on that day and not assigned any job
+                                else if (index >= 0 && initial[i].Count() == 0)
+                                {
+                                    staff_str = staffset[i].work_str[index];
+                                    staff_end = staffset[i].work_end[index];
+                                    available_wins[i].Add(new available
+                                    {
+                                        str = staff_str,
+                                        end = staff_end,
+                                        duration = staff_end - staff_str,
+                                    });
+
+                                    //Console.WriteLine("\nstaff {0} available from {1} to {2}, no duty ", staffset[i].personID, staff_str, staff_end);
+
+                                }
+
+                                //staff work on that day and have duty
+                                else if (index >= 0 && initial[i].Count() > 0)
+                                {
+                                    //Console.WriteLine("\nstaff {0} works and have duty ", staffset[i].personID);
+
+                                    staff_str = staffset[i].work_str[index];
+                                    staff_end = staffset[i].work_end[index];
+                                    //Console.WriteLine("\nstaffstr: {0}", staff_str);
+                                    //for (int n = 0; n < initial[i].Count();n++)
+                                    //Console.WriteLine("job {0} str:{1} end:{2} dur: {3}", initial[i][n].jobID, initial[i][n].job_str, initial[i][n].job_end, initial[i][n].job.duration );
+
+                                    int dutyNum = initial[i].Count();
+
+                                    //for the first job
+                                    if (initial[i][0].job_str > staff_str)
+                                    {
+                                        available_wins[i].Add(new available
+                                        {
+                                            str = staff_str,
+                                            end = initial[i][0].job_str,
+                                            duration = initial[i][0].job_str - staff_str,
+                                        });
+
+                                        //Console.WriteLine("staff {0} available from {1} to {2}", staffset[i].personID, staff_str, initial[i][0].job_str);
+                                    }
+
+                                    //for the middle
+                                    if (dutyNum >= 2)
+                                    {
+                                        for (int k = 1; k < dutyNum; k++)
+                                        {
+                                            if (initial[i][k].job_str > initial[i][k - 1].job_end)
+                                            {
+                                                available_wins[i].Add(new available
+                                                {
+                                                    str = initial[i][k - 1].job_end,
+                                                    end = initial[i][k].job_str,
+                                                    duration = initial[i][k].job_str - initial[i][k - 1].job_end,
+                                                });
+                                            
+                                                //Console.WriteLine("staff {0} available from {1} to {2}", staffset[i].personID, initial[i][k - 1].job_end, initial[i][k].job_str);
+                                            }
+                                        }
+
+                                    }
+
+                                    // for the last job
+                                    if (initial[i][dutyNum - 1].job_end < staff_end)
+                                    {
+                                        available_wins[i].Add(new available
+                                        {
+                                            str = initial[i][dutyNum - 1].job_end,
+                                            end = staff_end,
+                                            duration = staff_end - initial[i][dutyNum - 1].job_end,
+                                        });
+
+                                        //Console.WriteLine("staff {0} available from {1} to {2}", staffset[i].personID, initial[i][dutyNum - 1].job_end, staff_end);
+
+                                    }
+
+                                }
+                                //Sort available windows 
+                                available_wins[i] = available_wins[i].OrderBy(o => o.str).ToList();
+                            //============== End of Update available ======================
+
+                            //Part2: Assign the first duty  ======================================
+
+                                if (initial[i].Count == 0) //first duty
+                                {                                                 
+                                    // randomly assign a job from possible job list
+                                    if (capable_[i].Count() > 0) //staff has possible work 
+                                    {
+                                        // random generate the job index                                      
+                                        Random rand = new Random(); //random object
+                                        int rnd = rand.Next(capable_[i].Count());
+
+                                        //two cases compare the start time of staffwork or possible job, and add with different job start
+                                        int startMax = Math.Max(capable_[i][rnd].win_str[0], staffset[i].work_str[index]);
+
+                                        initial[i].Add(new assign
+                                        {
+                                            job = capable_[i][rnd],
+                                            jobID = capable_[i][rnd].jobID,
+                                            job_str = startMax,
+                                            job_end = (startMax + capable_[i][rnd].duration),
+                                            totalwork = capable_[i][rnd].duration,
+                                        });
+
+                                        Console.WriteLine("staff {0} assign {1}, str:{2}, end:{3}", staffset[i].personID, capable_[i][rnd].jobID, startMax, startMax + capable_[i][rnd].duration);
+                                        //remove the assigned job from the staff capable list
+                                        capable_[i].RemoveAt(rnd);
+
+                                    }                                   
+                                }
                             
-                            if ( startcheck < 0)
-                            //if the str and end will all be in staff working time 
+                            //Part3: Assign the rest of jobs  ======================================    
+                                else if(initial[i].Count > 0) //after first duty, to assign duty based on available list
+                                {
+                                    if (capable_[i].Count() > 0) //staff has possible work 
+                                    {
+
+                                        // random generate the job index                                      
+                                        Random rand = new Random(); //random object
+                                        int rnd = rand.Next(capable_[i].Count());
+
+                                        bool assigned = false;
+                                        for (int j = 0; j < available_wins[i].Count(); j++) //for every available windows
+                                        {
+                                            //available time must be bigger or equal to the job
+                                            if (available_wins[i][j].duration >= capable_[i][rnd].duration)
+                                            {
+                                                //multiple windows
+                                                for (int k = 0; k < capable_[i][rnd].win_str.Count(); k++)
+                                                {
+                                                    int overlap_lw = Math.Max(capable_[i][rnd].win_str[k], available_wins[i][j].str);
+                                                    int overlap_up = Math.Min(capable_[i][rnd].win_end[k], available_wins[i][j].end);
+                                                    int overlap = overlap_up - overlap_lw;
+                                                    if (overlap >= capable_[i][rnd].duration)
+                                                    {
+                                                        initial[i].Add(new assign
+                                                        {
+                                                            job = capable_[i][rnd],
+                                                            jobID = capable_[i][rnd].jobID,
+                                                            job_str = overlap_lw,
+                                                            job_end = (overlap_lw + capable_[i][rnd].duration),
+                                                            totalwork = capable_[i][rnd].duration,
+                                                        });
+                                                        Console.WriteLine("staff {0} assign {1}, str:{2}, end:{3}", staffset[i].personID, capable_[i][rnd].jobID, overlap_lw, overlap_lw + capable_[i][rnd].duration);
+                                                        capable_[i].RemoveAt(rnd);
+
+                                                        assigned = true;
+                                                        break;
+                                                    }
+                                                }// multiple window
+
+                                            } //available window is long enough 
+
+                                            if (assigned)
+                                                break;
+
+                                        }//for every available windows
+
+
+                                    }//staff has possible work
+                                }//after first duty to assign duty 
+
+                            //============== End of assigning jobs ======================
+                                //Sort initial assignment
+                                initial[i] = initial[i].OrderBy(o => o.job_str).ToList();
+
+                                
+
+
+                                temp = temp + 1;
+                                if (temp > 5)
+                                    break;
+                            }//do while
+
+                                Console.WriteLine("\nstaffstr: {0}", staffset[i].work_str[index]);
+                                for (int n = 0; n < initial[i].Count(); n++)
+                                    Console.WriteLine("job {0} str:{1} end:{2} dur: {3}", initial[i][n].jobID, initial[i][n].job_str, initial[i][n].job_end, initial[i][n].job.duration);
+                                for (int n = 0; n < available_wins[i].Count(); n++)
+                                    Console.WriteLine("staff {0} available from {1} to {2}", staffset[i].personID, available_wins[i][n].str, available_wins[i][n].end);
+
+                        }//capable > 0
+                    }//index >= 0 
+
+                    /*
+                    //Case 1: staff doesn't work this date, then assign dayoff
+                    if (initial[i].Count == 0) //first duty
+                    {
+                        //if the staff doesnt work on this date, add dayoff as the first and only duty
+                        if (index < 0)
+                        {
+                            initial[i].Add(new assign
                             {
+                                job = day_off[0],
+                                jobID = 0,
+                                job_str = 0,
+                                job_end = 0,
+                                totalwork = 0,
+                            });
+                        }
+                        //Case 2: staff works on this date, randomly assign a job from possible job list
+                        else
+                        {
+                            if (capable_[i].Count() > 0) //staff has possible work 
+                            {
+                                // random generate the job index                                      
+                                Random rand = new Random(); //random object
+                                int rnd = rand.Next(capable_[i].Count());
+
+                                //two cases compare the start time of staffwork or possible job, and add with different job start
+                                int startMax = Math.Max(capable_[i][rnd].win_str[0], staffset[i].work_str[index]);
+
                                 initial[i].Add(new assign
                                 {
                                     job = capable_[i][rnd],
                                     jobID = capable_[i][rnd].jobID,
-                                    job_str = staffset[i].work_str[index],
-                                    job_end = (staffset[i].work_str[index] + capable_[i][rnd].duration),
+                                    job_str = startMax,
+                                    job_end = (startMax + capable_[i][rnd].duration),
                                     totalwork = capable_[i][rnd].duration,
                                 });
 
-
-                            }
-                            else if (startcheck >= 0)
-                            {
-                                initial[i].Add(new assign
-                                {
-                                    job = capable_[i][rnd],
-                                    jobID = capable_[i][rnd].jobID,
-                                    job_str = capable_[i][rnd].win_str[0],
-                                    job_end = (capable_[i][rnd].win_str[0] + capable_[i][rnd].duration),
-                                    totalwork = capable_[i][rnd].duration,
-                                });
                             }
                         }
                     }
@@ -751,7 +929,7 @@ namespace TeampointScheduling
                         
                     }
 
-                    //staff is available and not assigned any job
+                    //staff work on that day and not assigned any job
                     else if (index >= 0 && initial[i].Count() == 0) 
                     {
                         staff_str = staffset[i].work_str[index];
@@ -828,12 +1006,13 @@ namespace TeampointScheduling
                             //Not adding anything to available list if initial[i][dutyNum - 1].job_end >= staff_end
                         }
 
-
-
-
                     }
+                    //Sort available windows 
+                    available_wins[i] = available_wins[i].OrderBy(o => o.str).ToList();
 
-                        
+                    */
+
+
 
 
 
