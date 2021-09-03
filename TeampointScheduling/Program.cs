@@ -494,6 +494,9 @@ namespace TeampointScheduling
 
 
             //==========================Find feasible jobs for specific dates===================================
+            
+            List<Jobs> assignedjob = new List<Jobs>(); //To remove the assigned jobs in the capable list
+            int removeNum = 0; // To count how many jobs in capable_ list has been removed since the job is already assigned
             for (int d = 0; d < horizon.Count(); d++)
             {
                 //store the possible job for each staff
@@ -504,6 +507,9 @@ namespace TeampointScheduling
 
                 //store the available windows for each staff
                 List<available>[] available_wins = new List<available>[staffset.Count()];
+
+                //sort assignjob, to decrease loop number                     
+                assignedjob = assignedjob.OrderBy(o => o.job_dates[0]).ToList();
 
                 //Dayoff assignment
                 int[] none = {0};
@@ -549,58 +555,63 @@ namespace TeampointScheduling
                             int index = Array.IndexOf(staffset[i].work_dates, horizon[d]);
                             if (staffset[i].max_minutes[index] > 0)
                             {
-                                //2.3 Windows check
-                                //Every job has single or multiple windows
-                                for (int k = 0; k < dateDuty[d].dutyset[j].win_str.Length; k++)
+                                //2.3 Assigned check: check if the job is already assigned
+                                bool a = assignedjob.Exists(x => x.jobID == dateDuty[d].dutyset[j].jobID);
+
+                                if(!a)
                                 {
-
-                                    int staffstart = staffset[i].work_str[index];
-                                    int staffend = staffset[i].work_end[index];
-                                    int jobstart = dateDuty[d].dutyset[j].win_str[k];
-                                    int jobend = dateDuty[d].dutyset[j].win_end[k];
-
-                                    //Count the staff and job windows overlap  
-                                    int overlap_lw = Math.Max(staffstart, jobstart);
-                                    int overlap_up = Math.Min(staffend, jobend);
-                                    int overlap = overlap_up - overlap_lw;
-
-                                    // overlap > 0 means two windows have overlap
-                                    // overlap > duration means job can be done within the overlap 
-                                    if (overlap > 0 && overlap >= dateDuty[d].dutyset[j].duration)
-                                    {
-                                        winCheck += 1;
-                                        //Console.WriteLine("staff {0} job {1} overlap = {2}", staffset[i].personID, dateDuty[d].dutyset[j].jobID, overlap);
-                                        //Console.WriteLine("Add");
-                                    }
-                                    else
-                                    {
-                                        //Console.WriteLine("staff {0} job {1} overlap = {2}", staffset[i].personID, dateDuty[d].dutyset[j].jobID, overlap);
-                                        //Console.WriteLine("NotAdd");
-                                    }
-                                }
-
-                                if (winCheck > 0)
-                                {
-
-                                    bool except = dateDuty[d].dutyset[j].tags.Except(staffset[i].tags).Any();  //compare two tags array
-                                    if (!except) //False means a staff has all the tags a job needs
+                                    //2.4 Windows check
+                                    //Every job has single or multiple windows
+                                    for (int k = 0; k < dateDuty[d].dutyset[j].win_str.Length; k++)
                                     {
 
-                                        capable_[i].Add(new Jobs()
+                                        int staffstart = staffset[i].work_str[index];
+                                        int staffend = staffset[i].work_end[index];
+                                        int jobstart = dateDuty[d].dutyset[j].win_str[k];
+                                        int jobend = dateDuty[d].dutyset[j].win_end[k];
+
+                                        //Count the staff and job windows overlap  
+                                        int overlap_lw = Math.Max(staffstart, jobstart);
+                                        int overlap_up = Math.Min(staffend, jobend);
+                                        int overlap = overlap_up - overlap_lw;
+
+                                        // overlap > 0 means two windows have overlap
+                                        // overlap > duration means job can be done within the overlap 
+                                        if (overlap > 0 && overlap >= dateDuty[d].dutyset[j].duration)
                                         {
-                                            jobID = dateDuty[d].dutyset[j].jobID,
-                                            priority = dateDuty[d].dutyset[j].priority,
-                                            duration = dateDuty[d].dutyset[j].duration,
-                                            job_dates = dateDuty[d].dutyset[j].job_dates,
-                                            win_str = dateDuty[d].dutyset[j].win_str,
-                                            win_end = dateDuty[d].dutyset[j].win_end,
-                                            tags = dateDuty[d].dutyset[j].tags
-                                        });
+                                            winCheck += 1;
+                                            //Console.WriteLine("staff {0} job {1} overlap = {2}", staffset[i].personID, dateDuty[d].dutyset[j].jobID, overlap);
+                                            //Console.WriteLine("Add");
+                                        }
+                                        else
+                                        {
+                                            //Console.WriteLine("staff {0} job {1} overlap = {2}", staffset[i].personID, dateDuty[d].dutyset[j].jobID, overlap);
+                                            //Console.WriteLine("NotAdd");
+                                        }
+                                    }
+
+                                    if (winCheck > 0)
+                                    {
+
+                                        bool except = dateDuty[d].dutyset[j].tags.Except(staffset[i].tags).Any();  //compare two tags array
+                                        if (!except) //False means a staff has all the tags a job needs
+                                        {
+
+                                            capable_[i].Add(new Jobs()
+                                            {
+                                                jobID = dateDuty[d].dutyset[j].jobID,
+                                                priority = dateDuty[d].dutyset[j].priority,
+                                                duration = dateDuty[d].dutyset[j].duration,
+                                                job_dates = dateDuty[d].dutyset[j].job_dates,
+                                                win_str = dateDuty[d].dutyset[j].win_str,
+                                                win_end = dateDuty[d].dutyset[j].win_end,
+                                                tags = dateDuty[d].dutyset[j].tags
+                                            });
+                                        }
+
                                     }
 
                                 }
-
-
 
                             }
                             //else
@@ -630,15 +641,20 @@ namespace TeampointScheduling
                 //Step 2: assign
 
                 Console.WriteLine("Max winodw number is {0}", winNum);
-
+                
 
                 for (int i = 0; i < staffset.Count(); i++)
                 {
 
                     //================== Initial Assignment =============================================
-                    
+                    Console.WriteLine("\n");
                     //find the staff work start and end on a specific date
                     //index == -1 when the system can't find index of date
+                    
+                    //sort assignjob, to decrease loop number                    
+                    assignedjob = assignedjob.OrderBy(o => o.job_dates[0]).ToList();
+                    
+
                     int index = Array.IndexOf(staffset[i].work_dates, horizon[d]);
                     //Console.WriteLine("index={0}\n", index);
                     //Console.WriteLine("staff {0} \n", staffset[i].personID);
@@ -653,15 +669,32 @@ namespace TeampointScheduling
                             job_end = 0,
                             totalwork = 0,
                         });
-                        Console.WriteLine("\nstaff {0} doesn't work on the date", staffset[i].personID);
+                        Console.WriteLine("staff {0} doesn't work on the date", staffset[i].personID);
                     }
                     else 
                     {
                         if (capable_[i].Count() == 0)
-                            Console.WriteLine("\nstaff {0} works, but has no capable job on the date", staffset[i].personID);
+                            Console.WriteLine("staff {0} works, but has no capable job on the date", staffset[i].personID);
 
                         else if(capable_[i].Count() > 0)
-                        {
+                        {                            
+                            //Part0: Rmove all assigned jobs                            
+                            foreach (Jobs job in assignedjob)
+                            {
+                                
+                                for (int k = 0; k < capable_[i].Count(); k++)
+                                {
+                                    if (capable_[i][k].jobID == job.jobID)
+                                    {
+                                        removeNum = removeNum + 1;
+                                        Console.WriteLine("{0} remove {1}", staffset[i].personID,capable_[i][k].jobID);
+                                        capable_[i].RemoveAt(k);                                       
+                                        k--;
+                                    }                                                                             
+                                }                                    
+                            }
+                            
+
                             int temp = 0;
                             while (capable_[i].Count() > 0)
                             {
@@ -763,15 +796,17 @@ namespace TeampointScheduling
                                 }
                                 //Sort available windows 
                                 available_wins[i] = available_wins[i].OrderBy(o => o.str).ToList();
-                            //============== End of Update available ======================
+                                //============== End of Update available ======================
 
-                            //Part2: Assign the first duty  ======================================
+                                //Part2: Assign the first duty  ======================================
 
+                                    
                                 if (initial[i].Count == 0) //first duty
                                 {                                                 
                                     // randomly assign a job from possible job list
                                     if (capable_[i].Count() > 0) //staff has possible work 
-                                    {
+                                    {                                       
+
                                         // random generate the job index                                      
                                         Random rand = new Random(); //random object
                                         int rnd = rand.Next(capable_[i].Count());
@@ -790,6 +825,7 @@ namespace TeampointScheduling
 
                                         Console.WriteLine("staff {0} assign {1}, str:{2}, end:{3}", staffset[i].personID, capable_[i][rnd].jobID, startMax, startMax + capable_[i][rnd].duration);
                                         //remove the assigned job from the staff capable list
+                                        assignedjob.Add(capable_[i][rnd]);
                                         capable_[i].RemoveAt(rnd);
 
                                     }                                   
@@ -828,6 +864,7 @@ namespace TeampointScheduling
                                                             totalwork = capable_[i][rnd].duration,
                                                         });
                                                         Console.WriteLine("staff {0} assign {1}, str:{2}, end:{3}", staffset[i].personID, capable_[i][rnd].jobID, overlap_lw, overlap_lw + capable_[i][rnd].duration);
+                                                        assignedjob.Add(capable_[i][rnd]);
                                                         capable_[i].RemoveAt(rnd);
 
                                                         assigned = true;
@@ -854,11 +891,11 @@ namespace TeampointScheduling
 
 
                                 temp = temp + 1;
-                                if (temp > 5)
+                                if (temp > 20)
                                     break;
                             }//do while
 
-                                Console.WriteLine("\nstaffstr: {0}", staffset[i].work_str[index]);
+                                Console.WriteLine("staffstr: {0}", staffset[i].work_str[index]);
                                 for (int n = 0; n < initial[i].Count(); n++)
                                     Console.WriteLine("job {0} str:{1} end:{2} dur: {3}", initial[i][n].jobID, initial[i][n].job_str, initial[i][n].job_end, initial[i][n].job.duration);
                                 for (int n = 0; n < available_wins[i].Count(); n++)
@@ -1031,12 +1068,19 @@ namespace TeampointScheduling
                     }
                     Console.WriteLine("\n");
 
+                bool duplicate = assignedjob.GroupBy(n => n).Any(c => c.Count() > 1);
+                Console.WriteLine("\n Total assigned jobs after day {0}", d);
+                foreach (Jobs job in assignedjob)
+                {
+                    Console.Write(" {0}", job.jobID);                    
+                }
+                if (!duplicate) Console.WriteLine("\nThere is no job assigned more than once!!");
+                Console.WriteLine("\n remove number: {0} \nTotal assigned jobs: {1}", removeNum, assignedjob.Count());
 
 
-
-
-                
             }//date loop
+
+
 
 
 
