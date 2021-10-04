@@ -123,6 +123,7 @@ namespace TeampointScheduling
         public int drv_str;
         public int job_str; 
         public int job_end;
+        public int drv_back;
         public int totalwork;
         public int totaldrive;
 
@@ -152,7 +153,7 @@ namespace TeampointScheduling
         public int drvstr; //the time staff need to start drive
         public int jobstr; //the start of the job window 
         public int workstr; //the actual job start time
-        public int str; //time that driving start
+        public int drvback; //time that driving start
     }
 
 
@@ -254,6 +255,8 @@ namespace TeampointScheduling
                 //Console.WriteLine(sub);
             }
 
+            
+
             // =========================START FROM HERE==============================
             var watch = new System.Diagnostics.Stopwatch();
             watch.Start();
@@ -266,6 +269,38 @@ namespace TeampointScheduling
             List<string> horizon = new List<string>();
 
             int winNum = 0; //the max windows number( for assigning jobs)
+
+            //clear SQL result
+            string clear = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+            using (var conn = new MySqlConnection(clear))
+            {
+                conn.Open();
+
+                string delete = "DELETE FROM data1.schedule_results;";
+                using (var cmd = new MySqlCommand(delete, conn))
+                {
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                        }
+                    }
+                }
+
+                string id = "ALTER TABLE data1.schedule_results AUTO_INCREMENT = 1;";
+                using (var cmd = new MySqlCommand(id, conn))
+                {
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                        }
+                    }
+                }
+
+                conn.Close();
+            }
+
 
             //read jobs from MySQL
             string cs = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
@@ -742,6 +777,7 @@ namespace TeampointScheduling
                             job_str = 0,
                             job_end = 0,
                             totalwork = 0,
+                            totaldrive = 0
                         });
                         Console.WriteLine("staff {0} doesn't work on the date", staffset[i].personID);
                     }
@@ -876,7 +912,8 @@ namespace TeampointScheduling
 
                                 //sort capable list
                                 capable_[i] = capable_[i].OrderBy(o => o.win_str[0]).ToList();
-
+                                
+                                
                                 /*
                                 //(1) Option 1: random assign     
                                 if (initial[i].Count == 0) //first duty
@@ -914,7 +951,7 @@ namespace TeampointScheduling
 
 
                                 //Option 2: assign job with earliest driving + start time the job as first
-                                
+
                                 if (initial[i].Count() == 0) //first duty
                                 {
                                     // randomly assign a job from possible job list
@@ -927,7 +964,9 @@ namespace TeampointScheduling
                                         {                                           
                                             //Search driving time
                                             List<traveltime> find = GetDrivingTime(trvtime, $"T-{s}", capable_[i][j].jobID.ToString());
+                                            List<traveltime> back = GetDrivingTime(trvtime, capable_[i][j].jobID.ToString(), $"T-{s}");
                                             
+
                                             if (find.Count() != 0) 
                                             {
                                                 //multiple windows
@@ -967,7 +1006,8 @@ namespace TeampointScheduling
                                                         Console.WriteLine("\nNEW driving case not included yet!");
                                                     }
                                                     //Console.WriteLine("\nadd possible firstDrv");
-                                                    firstDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr });
+                                                    firstDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = back[0].duration });
+                                                    
                                                 }
 
                                             }
@@ -975,7 +1015,7 @@ namespace TeampointScheduling
                                         }
 
                                         //sort jobs by start time considering driving time
-                                        firstDrv = firstDrv.OrderBy(x => x.workstr ).ToList();
+                                        firstDrv = firstDrv.OrderBy(x => x.workstr).ToList();
                                         Console.WriteLine("====================Staff {0} Scheduling Result on {1}========================",staffset[i].personID, horizon[d]);
                                         Console.WriteLine("staffstr:{0} staffend:{1} maxwork:{2}", staff_str, staff_end, staffset[i].max_minutes[index]);
 
@@ -986,6 +1026,8 @@ namespace TeampointScheduling
                                         }
                                         for (int k = 0; k < firstDrv.Count(); k++)
                                         {
+                                            int end = firstDrv[k].workstr + firstDrv[k].job.duration;
+
                                             initial[i].Add(new assign
                                             {
                                                 job = firstDrv[k].job,
@@ -993,23 +1035,78 @@ namespace TeampointScheduling
                                                 drvTime = firstDrv[k].drvTime,
                                                 drv_str = firstDrv[k].drvstr,
                                                 job_str = firstDrv[k].workstr,
-                                                job_end = firstDrv[k].workstr + firstDrv[k].job.duration,
+                                                job_end = end,
+                                                drv_back = firstDrv[k].drvback,
                                                 totalwork = firstDrv[k].job.duration,
+                                                totaldrive = firstDrv[k].drvTime,
                                             });
-                                            Console.WriteLine("staff {0} fisrt assign {1} drvstr:{2} drvTime:{3} workstr:{4} workTime:{5} end:{6}, totalwork:{7}", 
+                                            Console.WriteLine("staff {0} fisrt assign {1} drvstr:{2} drvTime:{3} workstr:{4} workTime:{5} end:{6}, totalwork:{7} totaldrive:{8}", 
                                                 staffset[i].personID, 
                                                 firstDrv[k].job.jobID, 
                                                 firstDrv[k].drvstr, 
                                                 firstDrv[k].drvTime, 
                                                 firstDrv[k].workstr, 
                                                 firstDrv[k].job.duration,
-                                                firstDrv[k].workstr + firstDrv[k].job.duration,
-                                                firstDrv[k].job.duration
+                                                end,
+                                                firstDrv[k].job.duration, 
+                                                firstDrv[k].drvTime
+
                                                 );
                                             
-                                            //remove the assigned job from the staff capable list
                                             assignedjob.Add(firstDrv[k].job);
 
+                                            //delete all records
+                                            string write = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+                                            using (var conn = new MySqlConnection(write))
+                                            {
+                                                conn.Open();
+
+                                                //drive
+                                                string drv = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                                using (var cmd = new MySqlCommand(drv, conn))
+                                                {
+                                                    cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                                    cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                                    cmd.Parameters.AddWithValue("@job", firstDrv[k].job.jobID);
+                                                    cmd.Parameters.AddWithValue("@str", firstDrv[k].drvstr);
+                                                    cmd.Parameters.AddWithValue("@end", firstDrv[k].workstr);
+                                                    cmd.Parameters.AddWithValue("@dur", firstDrv[k].drvTime);
+                                                    cmd.Parameters.AddWithValue("@type", 1);
+                                                    using (var reader = cmd.ExecuteReader())
+                                                    {
+                                                        while (reader.Read())
+                                                        {
+
+                                                        }
+                                                    }
+                                                }
+
+                                                //work;
+                                                string work = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                                using (var cmd = new MySqlCommand(work, conn))
+                                                {
+                                                    cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                                    cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                                    cmd.Parameters.AddWithValue("@job", firstDrv[k].job.jobID);
+                                                    cmd.Parameters.AddWithValue("@str", firstDrv[k].workstr);
+                                                    cmd.Parameters.AddWithValue("@end", end);
+                                                    cmd.Parameters.AddWithValue("@dur", firstDrv[k].job.duration);
+                                                    cmd.Parameters.AddWithValue("@type", 2);
+                                                    using (var reader = cmd.ExecuteReader())
+                                                    {
+                                                        while (reader.Read())
+                                                        {
+
+                                                        }
+                                                    }
+                                                }
+
+
+                                                conn.Close();
+                                            }
+
+
+                                            //remove the assigned job from the staff capable list
                                             int x = capable_[i].IndexOf(firstDrv[k].job);
                                             capable_[i].RemoveAt(x);
 
@@ -1159,7 +1256,7 @@ namespace TeampointScheduling
                                     {
                                         List<driving> JobDrv = new List<driving>();
                                         //Find driving time from one location to all the other jobs'location
-
+                                        
                                         num = initial[i].Count();
                                         string s = staffset[i].personID.ToString();                     
                                         string duty = initial[i][num - 1].jobID.ToString();
@@ -1168,6 +1265,7 @@ namespace TeampointScheduling
                                             //Search driving time
                                             List<traveltime> find = GetDrivingTime(trvtime, $"{duty}", capable_[i][j].jobID.ToString());
                                             List<traveltime> back = GetDrivingTime(trvtime, capable_[i][j].jobID.ToString(), $"T-{s}");
+                                            
 
                                             if (find.Count() != 0)
                                             {
@@ -1211,11 +1309,17 @@ namespace TeampointScheduling
                                                     int maxwork = staffset[i].max_minutes[index];
                                                     int total = capable_[i][j].duration + initial[i][num - 1].totalwork;
 
-                                                    //To check (1)staff have time to drive back to the job center (2) total worktime <= minimumwork time
-                                                    if (workstr + capable_[i][j].duration + back[0].duration <= staff_end && total <= maxwork)
+                                                    //staff min drive time on the date
+                                                    int maxdrive = staffset[i].max_miles;
+                                                    int totaldrive = find[0].duration + initial[i][num - 1].totaldrive;
+
+                                                    //To check (1)staff have time to drive back to the job center (2) total worktime <= max work time
+                                                    //(3) total drive minutes <= max drive time
+                                                    if (workstr + capable_[i][j].duration + back[0].duration <= staff_end && total <= maxwork && totaldrive <= maxdrive)
                                                     {
                                                         //Console.WriteLine("\nadd possible JobDrv");
-                                                        JobDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr });
+                                                        JobDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = back[0].duration });
+                                                        
                                                     }
                                                     //else if (total > maxwork)
                                                         //Console.WriteLine("exceed max work time");
@@ -1240,8 +1344,10 @@ namespace TeampointScheduling
                                         {
                                             //Console.WriteLine("staff{0} job:{1} jobstr:{2} drivestr:{3} drive:{4} workstr:{5}", staffset[i].personID, JobDrv[k].job.jobID, JobDrv[k].jobstr, JobDrv[k].drvstr, JobDrv[k].drvTime, JobDrv[k].workstr);
                                         }
+
                                         for (int k = 0; k < JobDrv.Count(); k++)
                                         {
+                                            int end = JobDrv[k].workstr + JobDrv[k].job.duration;
                                             initial[i].Add(new assign
                                             {
                                                 job = JobDrv[k].job,
@@ -1249,26 +1355,80 @@ namespace TeampointScheduling
                                                 drvTime = JobDrv[k].drvTime,
                                                 drv_str = JobDrv[k].drvstr,
                                                 job_str = JobDrv[k].workstr,
-                                                job_end = JobDrv[k].workstr + JobDrv[k].job.duration,
+                                                job_end = end,
+                                                drv_back = JobDrv[k].drvback,
                                                 totalwork = initial[i][num-1].totalwork + JobDrv[k].job.duration,
+                                                totaldrive = initial[i][num - 1].totaldrive + JobDrv[k].drvTime,
                                             });
-                                            Console.WriteLine("staff {0} assign {1} drvstr:{2} drvTime:{3} workstr:{4} workTime:{5} end:{6} totalwork:{7}", 
+                                            Console.WriteLine("staff {0} assign {1} drvstr:{2} drvTime:{3} workstr:{4} workTime:{5} end:{6} totalwork:{7} totaldrive:{8}", 
                                                 staffset[i].personID, 
                                                 JobDrv[k].job.jobID, 
                                                 JobDrv[k].drvstr, 
                                                 JobDrv[k].drvTime, 
                                                 JobDrv[k].workstr, 
                                                 JobDrv[k].job.duration, 
-                                                JobDrv[k].workstr + JobDrv[k].job.duration,
-                                                initial[i][num - 1].totalwork + JobDrv[k].job.duration
-                                                
+                                                end,
+                                                initial[i][num - 1].totalwork + JobDrv[k].job.duration,
+                                                initial[i][num - 1].totaldrive + JobDrv[k].drvTime
                                                 );
 
-                                            //remove the assigned job from the staff capable list
                                             assignedjob.Add(JobDrv[k].job);
 
+                                            //write back to database
+                                            string write = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+                                            using (var conn = new MySqlConnection(write))
+                                            {
+                                                conn.Open();
+
+                                                //drive
+                                                string drv = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                                using (var cmd = new MySqlCommand(drv, conn))
+                                                {
+                                                    cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                                    cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                                    cmd.Parameters.AddWithValue("@job", JobDrv[k].job.jobID);
+                                                    cmd.Parameters.AddWithValue("@str", JobDrv[k].drvstr);
+                                                    cmd.Parameters.AddWithValue("@end", JobDrv[k].workstr);
+                                                    cmd.Parameters.AddWithValue("@dur", JobDrv[k].drvTime);
+                                                    cmd.Parameters.AddWithValue("@type", 1);
+                                                    using (var reader = cmd.ExecuteReader())
+                                                    {
+                                                        while (reader.Read())
+                                                        {
+
+                                                        }
+                                                    }
+                                                }
+
+                                                //work;
+                                                string work = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                                using (var cmd = new MySqlCommand(work, conn))
+                                                {
+                                                    cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                                    cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                                    cmd.Parameters.AddWithValue("@job", JobDrv[k].job.jobID);
+                                                    cmd.Parameters.AddWithValue("@str", JobDrv[k].workstr);
+                                                    cmd.Parameters.AddWithValue("@end", end);
+                                                    cmd.Parameters.AddWithValue("@dur", JobDrv[k].job.duration);
+                                                    cmd.Parameters.AddWithValue("@type", 2);
+                                                    using (var reader = cmd.ExecuteReader())
+                                                    {
+                                                        while (reader.Read())
+                                                        {
+
+                                                        }
+                                                    }
+                                                }
+
+
+                                                conn.Close();
+                                            }
+
+                                            //remove the assigned job from the staff capable list
                                             int x = capable_[i].IndexOf(JobDrv[k].job);
                                             capable_[i].RemoveAt(x);
+
+                                            
 
                                             break;
                                         }
@@ -1331,7 +1491,40 @@ namespace TeampointScheduling
 
                                 temp = temp + 1;
                                 if (temp > 12)
+                                {   
+                                    //write the last driving to database
+                                    //Last driving end time
+                                    int endTime = initial[i][initial[i].Count() - 1].job_end + initial[i][initial[i].Count() - 1].drv_back;
+                                    
+                                    string write = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+                                    using (var conn = new MySqlConnection(write))
+                                    {
+                                        conn.Open();
+
+                                        string drv = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                        using (var cmd = new MySqlCommand(drv, conn))
+                                        {
+                                            cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                            cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                            cmd.Parameters.AddWithValue("@job", initial[i][initial[i].Count()-1].jobID);
+                                            cmd.Parameters.AddWithValue("@str", initial[i][initial[i].Count() - 1].job_end);
+                                            cmd.Parameters.AddWithValue("@end", endTime);
+                                            cmd.Parameters.AddWithValue("@dur", initial[i][initial[i].Count() - 1].drv_back);
+                                            cmd.Parameters.AddWithValue("@type", 1);
+                                            using (var reader = cmd.ExecuteReader())
+                                            {
+                                                while (reader.Read())
+                                                {
+
+                                                }
+                                            }
+                                        }
+                                        conn.Close();
+                                    }
+
                                     break;
+                                }
+                                    
                             }//do while
 
                                 
@@ -1377,9 +1570,59 @@ namespace TeampointScheduling
 
             Console.WriteLine($"Execution Time: {watch.ElapsedMilliseconds/60000} minutes");
 
+           /*
+            //insert data in MySQL 
+            try
+            {
+
+                string write = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+
+                using (var conn = new MySqlConnection(write))
+                {
+                    conn.Open();
+
+                    //string sql = $"SELECT * FROM schedule_travel_times";
+                    string sql = "insert into data1.schedule_result (personid, jobid) values( 19, 20);";
+                    using (var cmd = new MySqlCommand(sql, conn))
+                    {
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string locFrom = reader.GetString(0);
+                                string locTo = reader.GetString(1);
+                                int travel = int.Parse(reader.GetString(2));
+                                //Console.WriteLine("{0},{1},{2}",locFrom, locTo, travel );
+                                trvtime.Add(new traveltime() { locFrom = locFrom, locTo = locTo, duration = travel });
+                            }
+                        }
+                    }
+                }
 
 
+                //This is my connection string i have assigned the database file address path  
+                string MyConnection2 = "datasource=localhost;port=3307;username=root;password=root";
+                //This is my insert query in which i am taking input from the user through windows forms  
+                string Query = "insert into student.studentinfo(idStudentInfo,Name,Father_Name,Age,Semester) values('" + this.IdTextBox.Text + "','" + this.NameTextBox.Text + "','" + this.FnameTextBox.Text + "','" + this.AgeTextBox.Text + "','" + this.SemesterTextBox.Text + "');";
+                //This is  MySqlConnection here i have created the object and pass my connection string.  
+                MySqlConnection MyConn2 = new MySqlConnection(MyConnection2);
+                //This is command class which will handle the query and connection object.  
+                MySqlCommand MyCommand2 = new MySqlCommand(Query, MyConn2);
+                MySqlDataReader MyReader2;
+                MyConn2.Open();
+                MyReader2 = MyCommand2.ExecuteReader();     // Here our query will be executed and data saved into the database.  
+                MessageBox.Show("Save Data");
+                while (MyReader2.Read())
+                {
+                }
+                MyConn2.Close();
+            }
+            catch (Exception ex)
+            {               
+                Console.WriteLine("Error accessing the database: {0}", e.Message);
+            }
 
+            /*
             /*
 
             string sql = "SELECT personid,tag, dayoff, max_minutes, max_miles FROM test.operative_test";
