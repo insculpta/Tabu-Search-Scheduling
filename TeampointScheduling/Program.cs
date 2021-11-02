@@ -96,30 +96,7 @@ namespace TeampointScheduling
 
     class Program
     {
-        public static void ReadFile(List<int> personID, List<int> max_minutes, List<int> max_miles, List<string> tags, List<string> dayoff)
-        {
-
-            string[] operative;
-            if (File.Exists(@"testoperative.csv"))  
-            {
-                //Console.WriteLine("The file exists!");
-                StreamReader sr = new StreamReader(@"testoperative.csv");
-                while (!sr.EndOfStream)
-                {
-                    operative = sr.ReadLine().Split(',');
-                    personID.Add(int.Parse(operative[0]));
-                    max_minutes.Add(int.Parse(operative[1]));
-                    max_miles.Add(int.Parse(operative[2]));
-                    tags.Add(operative[3]);
-                    dayoff.Add(operative[4]);
-                }
-            }
-            else
-            {
-                Console.WriteLine("The file doesn\'t exists !");
-            }
-
-        }
+        
         public static void PrintStr(string i) 
         {
             Console.WriteLine(i);
@@ -128,24 +105,6 @@ namespace TeampointScheduling
         {
             Console.WriteLine(i);
         }
-
-        
-        public static List<traveltime> GetDrivingTime(List<traveltime>trvtime, string locFrom , string locTo )
-        {
-            List<traveltime> temp1 = trvtime.FindAll(x => x.locFrom == $"{locFrom}");
-            List<traveltime> find = temp1.FindAll(x => x.locTo == $"{locTo}");
-            if (find.Count() == 0)
-            {
-                temp1 = trvtime.FindAll(x => x.locFrom == $"{locTo}");
-                find = temp1.FindAll(x => x.locTo == $"{locFrom}");
-
-                if (find.Count() == 0)
-                    Console.WriteLine("No driving time data from staff {0} to {1}", locFrom, locTo);
-            }
-
-            return (find);
-        }
-
 
 
         static void Main(string[] args)
@@ -158,7 +117,6 @@ namespace TeampointScheduling
             List<int> max_miles = new List<int>();
             List<string> dayoff = new List<string>();
             List<int> worker_tags = new List<int>();
-            
 
             // =========================START FROM HERE==============================
             var watch = new System.Diagnostics.Stopwatch();
@@ -169,12 +127,17 @@ namespace TeampointScheduling
             List<Duty> dateDuty = new List<Duty>();
             List<traveltime> trvtime = new List<traveltime>();
 
+            //For searching travel time
+            Dictionary<(int, int), int> staffjob = new Dictionary<(int, int), int>();
+            Dictionary<(int, int), int> between = new Dictionary<(int, int), int>();
+            Dictionary<(int, int), int> jobstaff = new Dictionary<(int, int), int>();
+
             List<string> horizon = new List<string>();
 
             int winNum = 0; //the max windows number( for assigning jobs)
 
             //clear SQL result
-            string clear = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+            string clear = @"Server = 192.168.0.17; Port = 3306; Database = data1 ; Uid = Jin; Pwd = rex840406";
             using (var conn = new MySqlConnection(clear))
             {
                 conn.Open();
@@ -487,11 +450,38 @@ namespace TeampointScheduling
                     {
                         while (reader.Read())
                         {
+                            //travel time list
                             string locFrom = reader.GetString(0);
                             string locTo = reader.GetString(1);
                             int travel = int.Parse(reader.GetString(2));
                             //Console.WriteLine("{0},{1},{2}",locFrom, locTo, travel );
                             trvtime.Add(new traveltime() {locFrom = locFrom, locTo = locTo, duration = travel });
+                            
+                            // dictionary
+                            // from staff to job
+                            if (locFrom.Contains("T-") && !(locTo.Contains("T-")))
+                            {
+                                int staff = int.Parse(locFrom.TrimStart('T', '-'));
+                                int to = int.Parse(locTo);
+                                staffjob.Add((staff, to), travel);
+                            }
+                            //from job to staff
+                            else if (!locFrom.Contains("T-") && (locTo.Contains("T-")))
+                            {
+                                int from = int.Parse(locFrom);
+                                int staff = int.Parse(locTo.TrimStart('T', '-'));                                
+                                jobstaff.Add((from, staff), travel);
+                            }
+                            //between two jobs
+                            else if (!locFrom.Contains("T-") && !(locTo.Contains("T-")))
+                            {
+                                int from = int.Parse(locFrom);
+                                int to = int.Parse(locTo);
+                                between.Add((from, to), travel);
+                            }
+
+
+
                         }
                     }
                 }
@@ -657,8 +647,6 @@ namespace TeampointScheduling
 
                 for (int i = 0; i < staffset.Count(); i++)
                 {
-                    //calculate time for each staff day assignment 
-                    var eachwatch = new System.Diagnostics.Stopwatch();
 
                     //================== Initial Assignment =============================================
                     Console.WriteLine("\n");
@@ -702,7 +690,7 @@ namespace TeampointScheduling
                                     if (capable_[i][k].jobID == job.jobID)
                                     {
                                         removeNum = removeNum + 1;
-                                        Console.WriteLine("{0} remove {1}", staffset[i].personID, capable_[i][k].jobID);
+                                        //Console.WriteLine("{0} remove {1}", staffset[i].personID, capable_[i][k].jobID);
                                         capable_[i].RemoveAt(k);
                                         k--;
                                     }
@@ -713,14 +701,11 @@ namespace TeampointScheduling
 
                             int num = initial[i].Count();
                             int temp = 0;
-                            //for assigning rest of jobs 
-                            int opt_workstr = Int32.MaxValue;
-
 
 
                             while (capable_[i].Count() > 0)
                             {
-                                eachwatch.Start();
+                                
                                 //Part1: Update available Windows  ======================================
                                 int staff_str = staffset[i].work_str[index];
                                 int staff_end = staffset[i].work_end[index];
@@ -872,35 +857,55 @@ namespace TeampointScheduling
                                         List<driving> firstDrv = new List<driving>();
                                         //Find driving time from operator's initial location to all the other jobs'location
                                         string s = staffset[i].personID.ToString();
+                                        
+
                                         for (int j = 0; j < capable_[i].Count(); j++)
                                         {
-                                            //Search driving time
-                                            List<traveltime> find = GetDrivingTime(trvtime, $"T-{s}", capable_[i][j].jobID.ToString());
-                                            List<traveltime> back = GetDrivingTime(trvtime, capable_[i][j].jobID.ToString(), $"T-{s}");
+                                            //Search driving time: dictionary
+
+                                            int id = staffset[i].personID;
+                                            int job = capable_[i][j].jobID;
+                                            int result = 0; 
+                                            int find = 0;
+                                            
+                                            if (staffjob.TryGetValue((id, job), out result))
+                                            {
+                                                find = result;
+                                            }
+                                            else if (jobstaff.TryGetValue((job, id), out result))
+                                            {
+                                                find = result;
+                                            }
+                                            else 
+                                            {
+                                                Console.WriteLine("Key staff {0}, job {1} driving time is not found.", id, job);
+                                            }
 
 
-                                            if (find.Count() != 0)
+
+                                            
+                                            if (find != 0)
                                             {
                                                 //multiple windows
                                                 for (int k = 0; k < capable_[i][j].win_str.Count(); k++)
-                                                {
-                                                    int check = capable_[i][j].win_str[k] - find[0].duration; //Jobstr-Drive
+                                                {                                                    
+                                                    int check = capable_[i][j].win_str[k] - find; //Jobstr-Drive
                                                     int workstr = check; int drvstr = capable_[i][j].win_str[k];
                                                     //Case1: job start time equals 1 means anytime 
                                                     if (capable_[i][j].win_str[k] == 1)
                                                     {
-                                                        drvstr = staff_str;
-                                                        workstr = staff_str + find[0].duration;
+                                                        drvstr = staff_str;             
+                                                        workstr = staff_str + find;
                                                     }
 
                                                     //Case2: workstr is in the job window
                                                     if (check < staff_str)  // Jobstr-Drive < staffstr
                                                     {
                                                         // if staffstr + drive + work <= jobend
-                                                        if (staff_str + find[0].duration + capable_[i][j].duration <= capable_[i][j].win_end[k])
+                                                        if (staff_str + find + capable_[i][j].duration <= capable_[i][j].win_end[k])
                                                         {
                                                             drvstr = staff_str;
-                                                            workstr = staff_str + find[0].duration;
+                                                            workstr = staff_str + find;
                                                         }
                                                         else
                                                         {
@@ -918,7 +923,7 @@ namespace TeampointScheduling
                                                         Console.WriteLine("\nNEW driving case not included yet!");
                                                     }
                                                     //Console.WriteLine("\nadd possible firstDrv");
-                                                    firstDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = back[0].duration });
+                                                    firstDrv.Add(new driving { job = capable_[i][j], drvTime = find, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = find });
 
                                                 }
 
@@ -1179,29 +1184,63 @@ namespace TeampointScheduling
 
                                         for (int j = 0; j < capable_[i].Count(); j++)
                                         {
-                                            //Search driving time
-                                            List<traveltime> find = GetDrivingTime(trvtime, $"{duty}", capable_[i][j].jobID.ToString());
-                                            List<traveltime> back = GetDrivingTime(trvtime, capable_[i][j].jobID.ToString(), $"T-{s}");
+                                            //Search driving time dictionary
+
+                                            int id = staffset[i].personID;
+                                            int job = capable_[i][j].jobID;
+                                            int prejob = initial[i][num - 1].jobID;
+                                            int result = 0;
+                                            int find = 0;
+                                            int back = 0;
+
+                                            //between jobs driving time
+                                            if (between.TryGetValue((prejob, job), out result))
+                                            {
+                                                find = result;
+                                            }
+                                            else if (between.TryGetValue((job, prejob), out result))
+                                            {
+                                                find = result;
+                                            }
+                                            else
+                                            {
+                                                Console.WriteLine("Key job {0} and job {1} driving time is not found.", prejob, job);
+                                            }
+
+                                            //return to initial position driving time
+                                            if (jobstaff.TryGetValue((job, id), out result))
+                                            {
+                                                back = result;
+                                            }
+                                            else if (staffjob.TryGetValue((id, job), out result))
+                                            {
+                                                back = result;
+                                            }
+                                            else
+                                            {
+                                                Console.WriteLine("Key staff {0}, job {1} driving time is not found.", id, job);
+                                            }
 
 
-                                            if (find.Count() != 0)
+                                            
+                                            if (find != 0)
                                             {
                                                 //multiple windows
                                                 for (int k = 0; k < capable_[i][j].win_str.Count(); k++)
                                                 {
-                                                    int check = capable_[i][j].win_str[k] - find[0].duration; //Jobstr-Drive
+                                                    
+                                                    int check = capable_[i][j].win_str[k] - find; //Jobstr-Drive
                                                     int workstr = check; int drvstr = capable_[i][j].win_str[k];
-
 
 
                                                     //Case1: job start time equals 1 means anytime && Case2: workstr is in the job window
                                                     if (capable_[i][j].win_str[k] == 1 || check < initial[i][num - 1].job_end)  // Jobstr-Drive < end of the last job
                                                     {
-                                                        // if staffstr + drive + work <= jobend
-                                                        if (initial[i][num - 1].job_end + find[0].duration + capable_[i][j].duration <= capable_[i][j].win_end[k])
+                                                        // if staffstr + drive + work <= jobend                                                        
+                                                        if (initial[i][num - 1].job_end + find + capable_[i][j].duration <= capable_[i][j].win_end[k])
                                                         {
                                                             drvstr = initial[i][num - 1].job_end;
-                                                            workstr = initial[i][num - 1].job_end + find[0].duration;
+                                                            workstr = initial[i][num - 1].job_end + find;
                                                             //Console.WriteLine("case 1 & 2 ");
                                                         }
                                                         else
@@ -1227,19 +1266,20 @@ namespace TeampointScheduling
                                                     int total = capable_[i][j].duration + initial[i][num - 1].totalwork;
 
                                                     //staff min drive time on the date
-                                                    int maxdrive = staffset[i].max_miles;
-                                                    int totaldrive = find[0].duration + initial[i][num - 1].totaldrive;
+                                                    int maxdrive = staffset[i].max_miles;                                                    
+                                                    int totaldrive = find + initial[i][num - 1].totaldrive;
 
                                                     //To check (1)staff have time to drive back to the job center (2) total worktime <= max work time
                                                     //(3) total drive minutes <= max drive time
-                                                    if (workstr + capable_[i][j].duration + back[0].duration <= staff_end && total <= maxwork && totaldrive <= maxdrive)
+                                                    
+                                                    if (workstr + capable_[i][j].duration + back <= staff_end && total <= maxwork && totaldrive <= maxdrive)
                                                     {
 
                                                         //Console.WriteLine("\nadd possible JobDrv");
-                                                        //if (workstr < opt_workstr)
+                                                        
                                                         {
-                                                            //JobDrv.Clear();
-                                                            JobDrv.Add(new driving { job = capable_[i][j], drvTime = find[0].duration, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = back[0].duration });
+                                        
+                                                            JobDrv.Add(new driving { job = capable_[i][j], drvTime = find, jobstr = capable_[i][j].win_str[k], drvstr = drvstr, workstr = workstr, drvback = back});
                                                         }
                                                     }
                                                     //else if (total > maxwork)
@@ -1418,45 +1458,45 @@ namespace TeampointScheduling
 
 
                                 temp = temp + 1;
-                                if (temp > 12)
+                                if (temp > 12 )
                                 {
-                                    //write the last driving to database
-                                    //Last driving end time
-                                    int endTime = initial[i][initial[i].Count() - 1].job_end + initial[i][initial[i].Count() - 1].drv_back;
-
-                                    string write = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
-                                    using (var conn = new MySqlConnection(write))
-                                    {
-                                        conn.Open();
-
-                                        string drv = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
-                                        using (var cmd = new MySqlCommand(drv, conn))
-                                        {
-                                            cmd.Parameters.AddWithValue("@date", horizon[d]);
-                                            cmd.Parameters.AddWithValue("@person", staffset[i].personID);
-                                            cmd.Parameters.AddWithValue("@job", initial[i][initial[i].Count() - 1].jobID);
-                                            cmd.Parameters.AddWithValue("@str", initial[i][initial[i].Count() - 1].job_end);
-                                            cmd.Parameters.AddWithValue("@end", endTime);
-                                            cmd.Parameters.AddWithValue("@dur", initial[i][initial[i].Count() - 1].drv_back);
-                                            cmd.Parameters.AddWithValue("@type", 1);
-                                            using (var reader = cmd.ExecuteReader())
-                                            {
-                                                while (reader.Read())
-                                                {
-
-                                                }
-                                            }
-                                        }
-                                        conn.Close();
-                                    }
-
-
                                     break;
                                 }
 
                             }//do while
 
+                            if (initial[i].Count() > 0)
+                            {
+                                //write the last driving to database
+                                //Last driving end time
+                                int endtime = initial[i][initial[i].Count() - 1].job_end + initial[i][initial[i].Count() - 1].drv_back;
 
+                                string returnLoc = @"Server = 127.0.0.1; Port = 3306; Database = data1 ; Uid = root; Pwd = rex840406";
+                                using (var conn = new MySqlConnection(returnLoc))
+                                {
+                                    conn.Open();
+
+                                    string drv = "insert into data1.schedule_results (date, personid, jobid, start_time, end_time, duration, task_type) values( @date, @person, @job, @str, @end, @dur, @type);";
+                                    using (var cmd = new MySqlCommand(drv, conn))
+                                    {
+                                        cmd.Parameters.AddWithValue("@date", horizon[d]);
+                                        cmd.Parameters.AddWithValue("@person", staffset[i].personID);
+                                        cmd.Parameters.AddWithValue("@job", initial[i][initial[i].Count() - 1].jobID);
+                                        cmd.Parameters.AddWithValue("@str", initial[i][initial[i].Count() - 1].job_end);
+                                        cmd.Parameters.AddWithValue("@end", endtime);
+                                        cmd.Parameters.AddWithValue("@dur", initial[i][initial[i].Count() - 1].drv_back);
+                                        cmd.Parameters.AddWithValue("@type", 1);
+                                        using (var reader = cmd.ExecuteReader())
+                                        {
+                                            while (reader.Read())
+                                            {
+
+                                            }
+                                        }
+                                    }
+                                    conn.Close();
+                                }
+                            }
                             //for (int n = 0; n < initial[i].Count(); n++)
                             //Console.WriteLine("job {0} drvstr:{1} workstr:{2} end:{3}", initial[i][n].jobID, initial[i][n].drv_str, initial[i][n].job_str, initial[i][n].job_end);
                             for (int n = 0; n < available_wins[i].Count(); n++)
@@ -1467,9 +1507,6 @@ namespace TeampointScheduling
                         }//capable > 0
                     }//index >= 0 
 
-                    Console.WriteLine($"\nAssign Execution Time: {eachwatch.ElapsedMilliseconds / 1000} seconds");
-                    Console.WriteLine($"Total Execution Time: {watch.ElapsedMilliseconds / 1000} seconds");
-                    eachwatch.Stop();
 
                 }//staff loop
 
@@ -1515,13 +1552,18 @@ namespace TeampointScheduling
                     Console.WriteLine("\n");
 
                 bool duplicate = assignedjob.GroupBy(n => n).Any(c => c.Count() > 1);
-                Console.WriteLine("\n Total assigned jobs after day {0}", d+1);
+                double rate = (double)assignedjob.Count()/ jobset.Count() *100;
+                var assignrate = string.Format("{0:0.0}", rate);
+                
+
+                Console.WriteLine("\n===================Results===================\nTotal assigned jobs after {0} day ", d+1);
                 foreach (Jobs job in assignedjob)
                 {
                     Console.Write(" {0}", job.jobID);                    
                 }
-                if (!duplicate) Console.WriteLine("\nThere is no job assigned more than once!!");
-                Console.WriteLine("\n remove number: {0} \nTotal assigned jobs: {1}", removeNum, assignedjob.Count());
+                if (!duplicate) Console.WriteLine("\n Check completed:Each job is only assigned once.");
+                Console.WriteLine("\nTotal staffs:{0}", staffset.Count());
+                Console.WriteLine("Total assigned jobs:{0} /{1}. Assigning rate:{2}%", assignedjob.Count(), jobset.Count(), assignrate);
 
 
             
@@ -1532,10 +1574,6 @@ namespace TeampointScheduling
             Console.WriteLine($"Execution Time: {watch.ElapsedMilliseconds/1000} seconds");
 
            
-
-
-
-
 
         }
     }
